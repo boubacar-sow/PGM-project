@@ -16,7 +16,7 @@ def test_attacks(data_name, model_name, attack_method, eps, batch_size, targeted
         X_train, Y_train, X_test, Y_test = data_mnist(train_start=0, train_end=30, test_start=0, test_end=10)
     
     source_samples, img_rows, img_cols = len(X_test), X_test.shape[0], X_test.shape[1]
-    nb_classes = len(np.unique(Y_test))
+    nb_classes = 10
     
     model = load_classifier(model_name, data_name)
     
@@ -35,17 +35,20 @@ def test_attacks(data_name, model_name, attack_method, eps, batch_size, targeted
     attack, attack_params = load_attack(attack_method)
     # Perform the attack
     adv_examples = []
+    #one hot encoding of y
+    y = torch.zeros((source_samples, nb_classes))
+    y[np.arange(source_samples), adv_ys] = 1
     for i in range(0, source_samples, batch_size):
-        adv_batch = attack(model, adv_inputs[i:min(source_samples,i+batch_size)], adv_ys[i:min(source_samples,i+batch_size)], **attack_params)
+        adv_batch = attack(model, adv_inputs[i:min(source_samples,i+batch_size)], y[i:min(source_samples,i+batch_size)], **attack_params)
         adv_examples.extend(adv_batch)
     adv_examples = np.array([adv_example.detach().numpy() for adv_example in adv_examples], dtype=np.float32)
     print('-'*30)
 
    # Evaluate the model on adversarial examples
     p_y_pred = model.predict(torch.tensor(adv_examples.reshape(-1, 1, 28, 28)))
-    print(p_y_pred.shape)
-    print(p_y_pred)
     _, y_preds = torch.max(p_y_pred, 1)
+    print(y_preds)
+    print(Y_test[:source_samples])
     accuracy = accuracy_score(Y_test[:source_samples], y_preds)
     print('Test accuracy on adversarial examples: {:.4f}'.format(accuracy))
 

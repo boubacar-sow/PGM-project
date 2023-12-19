@@ -10,7 +10,9 @@ def config_fgsm():
     return {
         'epsilon': 0.3,
         'clip_min': 0.,
-        'clip_max': 1.
+        'clip_max': 1.,
+        'targeted':False,
+        'sanity_checks':True
     }
     
     

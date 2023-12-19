@@ -18,6 +18,7 @@ import os
 import pickle
 from tqdm.notebook import tqdm
 import pandas as pd
+from typing import Callable, Optional, Tuple
 import numpy as np
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -31,7 +32,6 @@ def vae_loss(recon_x, x, mu, logvar):
 
     return recon_loss + variational_beta * kldivergence
 
-from typing import Callable, Optional
 def make_averager() -> Callable[[Optional[float]], float]:
     """ Returns a function that maintains a running average
 
@@ -108,57 +108,43 @@ def refresh_bar(bar, desc):
     bar.refresh()
 
 class Encoder(nn.Module):
-    def __init__(self, hidden_channels: int, latent_dim: int) -> None:
-        """
-        Simple encoder module
-        It predicts the `mean` and `log(variance)` parameters.
-        The choice to use the `log(variance)` is for stability reasons:
-        https://stats.stackexchange.com/a/353222/284141
-        """
+    def __init__(self, hidden_channels: int, latent_dim: int, num_labels: int) -> None:
         super().__init__()
         self.conv1 = nn.Conv2d(in_channels=1,
                                out_channels=hidden_channels,
                                kernel_size=4,
                                stride=2,
-                               padding=1) # out: hidden_channels x 14 x 14
+                               padding=1)
 
         self.conv2 = nn.Conv2d(in_channels=hidden_channels,
                                out_channels=hidden_channels*2,
                                kernel_size=4,
                                stride=2,
-                               padding=1) # out: (hidden_channels x 2) x 7 x 7
+                               padding=1)
 
-        self.fc_mu = nn.Linear(in_features=hidden_channels*2*7*7,
+        self.fc_mu = nn.Linear(in_features=hidden_channels*2*7*7 + num_labels,
                                out_features=latent_dim)
-        self.fc_logvar = nn.Linear(in_features=hidden_channels*2*7*7,
+        self.fc_logvar = nn.Linear(in_features=hidden_channels*2*7*7 + num_labels,
                                    out_features=latent_dim)
 
         self.activation = nn.ReLU()
 
-    def forward(self, x: torch.Tensor) -> (torch.Tensor, torch.Tensor):
-        """
-        :param x: batch of images with shape [batch, channels, w, h]
-        :returns: the predicted mean and log(variance)
-        """
-        x = self.activation(self.conv1(x))
-        x = self.activation(self.conv2(x))
+    def forward(self, x: torch.Tensor, y: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        h = self.activation(self.conv1(x))
+        h = self.activation(self.conv2(h))
+        h = h.view(h.size(0), -1)  # Flatten the tensor
+        h = torch.cat((h, y), dim=1)  # Now you can concatenate h and y along dimension 1
+        mu = self.fc_mu(h)
+        logvar = self.fc_logvar(h)
+        return mu, logvar
 
-        x = x.view(x.shape[0], -1)
-
-        x_mu = self.fc_mu(x)
-        x_logvar = self.fc_logvar(x)
-
-        return x_mu, x_logvar
 
 class Decoder(nn.Module):
-    def __init__(self, hidden_channels: int, latent_dim: int) -> None:
-        """
-        Simple decoder module
-        """
+    def __init__(self, hidden_channels: int, latent_dim: int, num_labels: int) -> None:
         super().__init__()
         self.hidden_channels = hidden_channels
 
-        self.fc = nn.Linear(in_features=latent_dim,
+        self.fc = nn.Linear(in_features=latent_dim + num_labels,
                             out_features=hidden_channels*2*7*7)
 
         self.conv2 = nn.ConvTranspose2d(in_channels=hidden_channels*2,
@@ -174,17 +160,14 @@ class Decoder(nn.Module):
 
         self.activation = nn.ReLU()
 
+    def forward(self, z: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        z = torch.cat((z, y), dim=1)  # Concatenate z and y
+        h = self.activation(self.fc(z))
+        h = h.view(h.size(0), self.hidden_channels*2, 7, 7)  # Reshape the tensor
+        h = self.activation(self.conv2(h))
+        x_recon = torch.sigmoid(self.conv1(h))
+        return x_recon
 
-    def forward(self, x: torch.Tensor, y=0) -> torch.Tensor:
-        """
-        :param x: a sample from the distribution governed by the mean and log(var)
-        :returns: a reconstructed image with size [batch, 1, w, h]
-        """
-        x = self.fc(x)
-        x = x.view(x.size(0), self.hidden_channels*2, 7, 7)
-        x = self.activation(self.conv2(x))
-        x = torch.sigmoid(self.conv1(x)) # last layer before output is sigmoid, since we are using BCE as reconstruction loss
-        return x
     
 
 class VariationalAutoencoder(nn.Module):
