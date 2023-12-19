@@ -63,28 +63,49 @@ class BayesModel(nn.Module):
         ind = list(range(1, len(x.shape)))
         return torch.sum(logprob, ind)
     
-    def lower_bound(self, x, K=100, beta=1.0):
+    def lower_bound(self, x, y_one_hot, K=100, beta=1.0):
         """
         Compute the lower bound for the input x and label y using importance sampling.
         """
-        log_joint_probs = torch.zeros(x.shape[0], self.num_labels, device=x.device)
+        log_joint_probs = torch.zeros(x.shape[0], device=x.device)
 
-        for c in range(self.num_labels):
-            y_c = torch.zeros(x.shape[0], self.num_labels, device=x.device)
-            y_c[:, c] = 1
+        z_samples = [self.latent_sample(*self.encoder(x, y_one_hot)) for _ in range(K)]
 
-            z_samples = [self.latent_sample(*self.encoder(x, y_c)) for _ in range(K)]
-
-            for z in z_samples:
-                log_p_x_z = self.log_bernoulli_prob(self.decoder(z, y_c), x)
-                log_p_z = self.log_gaussian_prob(z, torch.zeros_like(z), torch.zeros_like(z))
-                log_p_y_z = self.log_softmax_prob(z, y_c)
-                log_q_z_x = self.log_gaussian_prob(z, *self.encoder(x, y_c))
-                log_joint_probs[:, c] += (beta * log_p_x_z + log_p_y_z + log_p_z - log_q_z_x).detach()
+        for z in z_samples:
+            log_p_x_z = self.log_bernoulli_prob(self.decoder(z, y_one_hot), x)
+            log_p_z = self.log_gaussian_prob(z, torch.zeros_like(z), torch.zeros_like(z))
+            log_p_y_z = self.log_softmax_prob(z, y_one_hot)
+            log_q_z_x = self.log_gaussian_prob(z, *self.encoder(x, y_one_hot))
+            log_joint_probs += beta * log_p_x_z + log_p_y_z + log_p_z - log_q_z_x
 
         log_joint_probs /= K
 
         return log_joint_probs
+
+    def train_model(self, data_loader, optimizer, num_epochs=10):
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.train()  # Set the model to training mode
+        for epoch in range(num_epochs):
+            for x, y in data_loader:
+                x = x.to(device)
+                y = y.to(device)
+                optimizer.zero_grad()  # Zero out any gradients from the previous iteration
+
+                y = y.long()  # Ensure y is of type long
+                y_one_hot = torch.zeros(y.shape[0], self.num_labels, device=y.device)
+                y_one_hot.scatter_(1, y.unsqueeze(1), 1)
+
+                # Now pass y_one_hot to the lower_bound function
+                log_joint_probs = self.lower_bound(x, y_one_hot)
+
+                # Compute the loss as the negative lower bound
+                loss = -torch.mean(log_joint_probs)
+
+                loss.backward()  # Compute the gradients
+                optimizer.step()  # Update the model parameters
+
+            print(f"Epoch {epoch + 1}/{num_epochs} Loss: {loss.item()}")
+
 
     
     def predict(self, x, K=100):

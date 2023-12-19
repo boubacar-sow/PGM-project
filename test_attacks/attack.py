@@ -4,6 +4,7 @@ import torch.nn as nn
 
 from argparse import ArgumentParser
 from sklearn.metrics import accuracy_score
+from torch.utils.data import DataLoader
 
 from configs import * 
 from test_attacks.load.load_classifier import load_classifier
@@ -13,7 +14,7 @@ def test_attacks(data_name, model_name, attack_method, eps, batch_size, targeted
     
     if data_name == 'mnist':
         from utils import data_mnist
-        X_train, Y_train, X_test, Y_test = data_mnist(train_start=0, train_end=30, test_start=0, test_end=10)
+        X_train, Y_train, X_test, Y_test = data_mnist(train_start=0, train_end=100, test_start=0, test_end=10)
     
     source_samples, img_rows, img_cols = len(X_test), X_test.shape[0], X_test.shape[1]
     nb_classes = 10
@@ -33,6 +34,7 @@ def test_attacks(data_name, model_name, attack_method, eps, batch_size, targeted
     adv_inputs = adv_inputs.view(-1, 1, 28, 28)
 
     attack, attack_params = load_attack(attack_method)
+    
     # Perform the attack
     adv_examples = []
     #one hot encoding of y
@@ -43,12 +45,21 @@ def test_attacks(data_name, model_name, attack_method, eps, batch_size, targeted
         adv_examples.extend(adv_batch)
     adv_examples = np.array([adv_example.detach().numpy() for adv_example in adv_examples], dtype=np.float32)
     print('-'*30)
+    # Training the model on the train set and evaluating on test set with and without adversarial examples
+    data_loader_train = DataLoader(list(zip(X_train.reshape(-1, 1, 28, 28), Y_train)), batch_size=batch_size, shuffle=True)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    model.train_model(data_loader_train, optimizer, num_epochs=10)
 
-   # Evaluate the model on adversarial examples
+    
+    # Evaluate the model on clean examples
+    p_y_pred = model.predict(torch.tensor(X_test[:source_samples].reshape(-1, 1, 28, 28)))
+    _, y_preds = torch.max(p_y_pred, 1)
+    accuracy = accuracy_score(Y_test[:source_samples], y_preds)
+    print('Test accuracy on clean examples: {:.4f}'.format(accuracy))
+    
+    # Evaluate the model on adversarial examples
     p_y_pred = model.predict(torch.tensor(adv_examples.reshape(-1, 1, 28, 28)))
     _, y_preds = torch.max(p_y_pred, 1)
-    print(y_preds)
-    print(Y_test[:source_samples])
     accuracy = accuracy_score(Y_test[:source_samples], y_preds)
     print('Test accuracy on adversarial examples: {:.4f}'.format(accuracy))
 
