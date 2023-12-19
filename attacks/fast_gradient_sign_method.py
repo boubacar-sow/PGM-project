@@ -8,6 +8,7 @@ from torch.nn.modules.loss import _Loss
 from typing import Callable
 
 variational_beta = 1
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 def vae_loss(recon_x, x, mu, logvar):
     recon_loss = F.binary_cross_entropy(recon_x.view(-1, 784), x.view(-1, 784), reduction='sum')
     # You can look at the derivation of the KL term here https://arxiv.org/pdf/1907.08956.pdf
@@ -45,13 +46,18 @@ def fast_gradient_sign_method(
     loss = vae_loss(x_recon, x, latent_mu, latent_logvar)
     if targeted:
         loss = -loss
-    loss.backward()
+    loss.backward(retain_graph=True)  # Add retain_graph=True here
+
+    # Check that gradients have been computed
+    assert x_adv.grad is not None, "No gradients for x_adv"
+
     x_adv = x_adv + epsilon * x_adv.grad.sign()
     x_adv = torch.clamp(x_adv, min=clip_min, max=clip_max)
     if sanity_checks:
         assert (x_adv - x).abs().max() <= epsilon + 1e-6, "Max perturbation exceeded"
 
     return x_adv
+
 
 
 

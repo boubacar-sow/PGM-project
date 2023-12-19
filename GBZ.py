@@ -22,8 +22,6 @@ from typing import Callable, Optional, Tuple
 import numpy as np
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-
-
 class Encoder(nn.Module):
     def __init__(self, hidden_channels: int, latent_dim: int, num_labels: int) -> None:
         super().__init__()
