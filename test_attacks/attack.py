@@ -58,7 +58,7 @@ def test_attacks(data_name, model_name, attack_method, eps, batch_size, targeted
 def main():
     parser = ArgumentParser(description='Run adversarial attacks.')
     parser.add_argument('--data_name', type=str, default='mnist')
-    parser.add_argument('--model_name', type=str, default='model')
+    parser.add_argument('--model_name', type=str, default='GBZ')
     parser.add_argument('--attack_method', type=str, default='fgsm')
     parser.add_argument('--eps', type=float, default=0.1)
     parser.add_argument('--batch_size', type=int, default=100)
