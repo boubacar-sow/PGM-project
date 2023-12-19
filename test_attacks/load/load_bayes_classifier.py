@@ -67,19 +67,14 @@ class BayesModel(nn.Module):
         """
         Compute the lower bound for the input x and label y using importance sampling.
         """
-        # Initialize a tensor to store the log joint probabilities for each class
         log_joint_probs = torch.zeros(x.shape[0], self.num_labels, device=x.device)
 
-        # Loop over each class
         for c in range(self.num_labels):
-            # Create a one-hot encoded label for this class
             y_c = torch.zeros(x.shape[0], self.num_labels, device=x.device)
             y_c[:, c] = 1
 
-            # Sample from the approximate posterior q(z|x*, yc)
             z_samples = [self.latent_sample(*self.encoder(x, y_c)) for _ in range(K)]
 
-            # Compute the log joint distribution for each sample
             for z in z_samples:
                 log_p_x_z = self.log_bernoulli_prob(self.decoder(z, y_c), x)
                 log_p_z = self.log_gaussian_prob(z, torch.zeros_like(z), torch.zeros_like(z))
@@ -87,7 +82,6 @@ class BayesModel(nn.Module):
                 log_q_z_x = self.log_gaussian_prob(z, *self.encoder(x, y_c))
                 log_joint_probs[:, c] += (beta * log_p_x_z + log_p_y_z + log_p_z - log_q_z_x).detach()
 
-        # Average the log joint probabilities over the samples
         log_joint_probs /= K
 
         return log_joint_probs
@@ -97,29 +91,21 @@ class BayesModel(nn.Module):
         """
         Predict the class probabilities for the input x using importance sampling.
         """
-        # Initialize a tensor to store the log joint probabilities for each class
         log_joint_probs = torch.zeros(x.shape[0], self.num_labels, device=x.device)
 
-        # Loop over each class
         for c in range(self.num_labels):
-            # Create a one-hot encoded label for this class
             y = torch.zeros(x.shape[0], self.num_labels, device=x.device)
             y[:, c] = 1
 
-            # Sample from the approximate posterior q(z|x*, yc)
             z_samples = [self.latent_sample(*self.encoder(x, y)) for _ in range(K)]
 
-            # Compute the log joint distribution for each sample
             for z in z_samples:
                 log_p_x_z = self.log_bernoulli_prob(self.decoder(z, y), x)
                 log_p_z = self.log_gaussian_prob(z, torch.zeros_like(z), torch.zeros_like(z))
                 log_p_y_z = self.log_softmax_prob(z, y)
                 log_joint_probs[:, c] += (log_p_x_z + log_p_z + log_p_y_z).detach()
-
-        # Average the log joint probabilities over the samples
         log_joint_probs /= K
 
-        # Compute the class probabilities using the softmax function
         y_pred = F.softmax(log_joint_probs, dim=1)
 
         return y_pred
