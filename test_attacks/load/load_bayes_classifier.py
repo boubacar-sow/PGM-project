@@ -40,11 +40,11 @@ class BayesModel(nn.Module):
             latent = latent_mu
         else:
             latent = self.latent_sample(latent_mu, latent_logvar)
-        x_recon = self.decoder(latent, y)
+        x_recon, y = self.decoder(latent)
         return x_recon, latent_mu, latent_logvar
 
 
-    import numpy as np
+import numpy as np
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
@@ -94,8 +94,8 @@ class BayesModel(nn.Module):
             latent = latent_mu
         else:
             latent = self.latent_sample(latent_mu, latent_logvar)
-        x_recon = self.decoder(latent, y)
-        return x_recon, latent_mu, latent_logvar
+        x_recon, y_pred = self.decoder(latent)
+        return x_recon, y_pred, latent_mu, latent_logvar
 
 
     def latent_sample(self, mu, logvar):
@@ -127,7 +127,7 @@ class BayesModel(nn.Module):
         z_samples = [self.latent_sample(*self.encoder(x, y_one_hot)) for _ in range(K)]
 
         for z in z_samples:
-            log_p_x_z = self.log_bernoulli_prob(self.decoder(z, y_one_hot), x)
+            log_p_x_z = self.log_bernoulli_prob(self.decoder(z)[0], x)
             log_p_z = self.log_gaussian_prob(z, torch.zeros_like(z), torch.zeros_like(z))
             log_p_y_z = self.log_softmax_prob(z, y_one_hot)
             log_q_z_x = self.log_gaussian_prob(z, *self.encoder(x, y_one_hot))
@@ -137,7 +137,7 @@ class BayesModel(nn.Module):
 
         return log_joint_probs
 
-    def train_model(self, data_loader, optimizer, num_epochs=10):
+    def train_model(self, data_loader, optimizer, num_epochs=30, variational_beta=1.0, K=100):
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.train()  # Set the model to training mode
         for epoch in range(num_epochs):
@@ -150,41 +150,53 @@ class BayesModel(nn.Module):
                 y_one_hot = torch.zeros(y.shape[0], self.num_labels, device=y.device)
                 y_one_hot.scatter_(1, y.unsqueeze(1), 1)
 
-                # Now pass y_one_hot to the lower_bound function
-                log_joint_probs = self.lower_bound(x, y_one_hot)
+                # Forward pass
+                x_recon, y_pred, latent_mu, latent_logvar = self.forward(x, y_one_hot)
 
-                # Compute the loss as the negative lower bound
-                loss = -torch.mean(log_joint_probs)
+                recon_loss = F.mse_loss(x_recon, x, reduction='sum')
+                label_loss = F.cross_entropy(y_pred, y, reduction='sum')  # Use y_pred directly
+                kldivergence = -0.5 * torch.sum(1 + latent_logvar - latent_mu.pow(2) - latent_logvar.exp())
+                loss = recon_loss + label_loss + variational_beta * kldivergence
 
                 loss.backward()  # Compute the gradients
                 optimizer.step()  # Update the model parameters
 
             print(f"Epoch {epoch + 1}/{num_epochs} Loss: {loss.item()}")
 
-
     
-    def predict(self, x, K=100):
-        """
-        Predict the class probabilities for the input x using importance sampling.
-        """
-        log_joint_probs = torch.zeros(x.shape[0], self.num_labels, device=x.device)
+    def predict(self, x, K=100, batch_size=32):
+      """
+      Predict the class probabilities for the input x using importance sampling.
+      """
+      num_batches = x.shape[0] // batch_size
+      y_pred = torch.zeros(x.shape[0], self.num_labels, device=x.device)
 
-        for c in range(self.num_labels):
-            y = torch.zeros(x.shape[0], self.num_labels, device=x.device)
-            y[:, c] = 1
+      for i in range(num_batches):
+          start = i * batch_size
+          end = start + batch_size
+          x_batch = x[start:end]
 
-            z_samples = [self.latent_sample(*self.encoder(x, y)) for _ in range(K)]
+          log_joint_probs = torch.zeros(x_batch.shape[0], self.num_labels, device=x.device)
 
-            for z in z_samples:
-                log_p_x_z = self.log_bernoulli_prob(self.decoder(z, y), x)
-                log_p_z = self.log_gaussian_prob(z, torch.zeros_like(z), torch.zeros_like(z))
-                log_p_y_z = self.log_softmax_prob(z, y)
-                log_joint_probs[:, c] += (log_p_x_z + log_p_z + log_p_y_z).detach()
-        log_joint_probs /= K
+          for c in range(self.num_labels):
+              y = torch.zeros(x_batch.shape[0], self.num_labels, device=x.device)
+              y[:, c] = 1
 
-        y_pred = F.softmax(log_joint_probs, dim=1)
+              z_samples = [self.latent_sample(*self.encoder(x_batch, y)) for _ in range(K)]
 
-        return y_pred
+              for z in z_samples:
+                  x_recon, y_pred_batch = self.decoder(z)
+                  log_p_x_z = self.log_bernoulli_prob(x_recon, x_batch)
+                  log_p_z = self.log_gaussian_prob(z, torch.zeros_like(z), torch.zeros_like(z))
+                  log_p_y_z = torch.log(y_pred_batch[:, c] + 1e-9)  # Use the predicted distribution over labels
+                  log_joint_probs[:, c] += (log_p_x_z + log_p_z + log_p_y_z).detach()
+
+          log_joint_probs /= K
+          y_pred[start:end] = F.softmax(log_joint_probs, dim=1)
+
+      return y_pred
+
+
 
 
 

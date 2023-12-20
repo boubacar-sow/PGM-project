@@ -59,8 +59,11 @@ class Decoder(nn.Module):
         super().__init__()
         self.hidden_channels = hidden_channels
 
-        self.fc = nn.Linear(in_features=latent_dim + num_labels,
-                            out_features=hidden_channels*2*7*7)
+        # MLP for p(y|z)
+        self.fc_py_z = nn.Linear(latent_dim, num_labels)
+
+        # MLP for p(x|z)
+        self.fc_px_z = nn.Linear(latent_dim, hidden_channels*2*7*7)
 
         self.conv2 = nn.ConvTranspose2d(in_channels=hidden_channels*2,
                                         out_channels=hidden_channels,
@@ -75,12 +78,16 @@ class Decoder(nn.Module):
 
         self.activation = nn.ReLU()
 
-    def forward(self, z: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        z = torch.cat((z, y), dim=1)  # Concatenate z and y
-        h = self.activation(self.fc(z))
+    def forward(self, z: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        # Use the MLP to get the distribution over labels
+        y = F.softmax(self.fc_py_z(z), dim=1)
+
+        # Use the MLP to get the initial tensor for image reconstruction
+        h = self.activation(self.fc_px_z(z))
         h = h.view(h.size(0), self.hidden_channels*2, 7, 7)  # Reshape the tensor
+
+        # Use the rest of the decoder to get the reconstructed image
         h = self.activation(self.conv2(h))
         x_recon = torch.sigmoid(self.conv1(h))
-        return x_recon
 
-    
+        return x_recon, y
