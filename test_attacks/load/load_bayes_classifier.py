@@ -1,47 +1,3 @@
-import numpy as np
-import torch
-import torch.nn as nn
-from torch.nn import functional as F
-from GBZ import Encoder, Decoder
-
-
-class BayesModel(nn.Module):
-    def __init__(self, data_name, hidden_channels, dimZ=64):
-        super(BayesModel, self).__init__()
-        if data_name == 'mnist':
-            self.num_channels = 1
-            self.image_size = 28
-            self.num_labels = 10
-        if data_name == 'cifar10':
-            self.num_channels = 3
-            self.image_size = 32
-            self.num_labels = 10
-        self.hidden_channels = hidden_channels
-        self.use_mean = True
-        self.training = True
-        
-        self.encoder = Encoder(hidden_channels=self.hidden_channels, latent_dim=dimZ, num_labels=self.num_labels)
-        self.decoder = Decoder(hidden_channels=self.hidden_channels, latent_dim=dimZ, num_labels=self.num_labels)
-
-        # MLP for p(y|z)
-        self.fc_py_z = nn.Linear(dimZ, self.num_labels)
-        
-    def log_softmax_prob(self, z, y):
-        """
-        Compute the log probability log p(y|z).
-        """
-        logit_y = self.fc_py_z(z)
-        log_p_y_z = -F.cross_entropy(logit_y, torch.argmax(y, dim=1), reduction='none')
-        return log_p_y_z
-    
-    def forward(self, x, y):
-        latent_mu, latent_logvar = self.encoder(x, y)
-        if self.use_mean:
-            latent = latent_mu
-        else:
-            latent = self.latent_sample(latent_mu, latent_logvar)
-        x_recon, y = self.decoder(latent)
-        return x_recon, latent_mu, latent_logvar
 
 
 import numpy as np
@@ -50,7 +6,7 @@ import torch.nn as nn
 from torch.nn import functional as F
 import sys
 sys.path.append('/content/PGM-project')
-
+import matplotlib.pyplot as plt
 from GBZ import Encoder, Decoder
 
 # Assuming you have already imported torch and torch.nn.functional as F
@@ -137,6 +93,7 @@ class BayesModel(nn.Module):
 
         return log_joint_probs
 
+
     def train_model(self, data_loader, optimizer, num_epochs=30, variational_beta=1.0, K=100):
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.train()  # Set the model to training mode
@@ -152,7 +109,7 @@ class BayesModel(nn.Module):
 
                 # Forward pass
                 x_recon, y_pred, latent_mu, latent_logvar = self.forward(x, y_one_hot)
-
+               
                 recon_loss = F.mse_loss(x_recon, x, reduction='sum')
                 label_loss = F.cross_entropy(y_pred, y, reduction='sum')  # Use y_pred directly
                 kldivergence = -0.5 * torch.sum(1 + latent_logvar - latent_mu.pow(2) - latent_logvar.exp())
@@ -162,6 +119,25 @@ class BayesModel(nn.Module):
                 optimizer.step()  # Update the model parameters
 
             print(f"Epoch {epoch + 1}/{num_epochs} Loss: {loss.item()}")
+
+    def display_images(self, original, reconstructed, epoch):
+        fig, axes = plt.subplots(nrows=2, ncols=10, figsize=(30, 6))
+
+        # Display original images
+        for i, ax in enumerate(axes[0, :]):
+            ax.imshow(original[i].reshape(28, 28).cpu(), cmap='gray')
+            ax.axis('off')
+
+        # Display reconstructed images
+        for i, ax in enumerate(axes[1, :]):
+            ax.imshow(reconstructed[i].reshape(28, 28).cpu(), cmap='gray')
+            ax.axis('off')
+
+        # Save the figure
+        plt.savefig(f'images_epoch_{epoch}.png')
+        plt.close(fig)  # Close the figure to free up memory
+
+
 
     
     def predict(self, x, K=100, batch_size=32):
@@ -185,11 +161,18 @@ class BayesModel(nn.Module):
               z_samples = [self.latent_sample(*self.encoder(x_batch, y)) for _ in range(K)]
 
               for z in z_samples:
+                  # Reconstruct input and get predicted labels
                   x_recon, y_pred_batch = self.decoder(z)
-                  log_p_x_z = self.log_bernoulli_prob(x_recon, x_batch)
+                  # Compute MSE loss (replace log_bernoulli_prob)
+                  log_p_x_z = F.mse_loss(x_recon, x_batch, reduction='sum')
+
+                  # Other log probabilities (if needed)
                   log_p_z = self.log_gaussian_prob(z, torch.zeros_like(z), torch.zeros_like(z))
-                  log_p_y_z = torch.log(y_pred_batch[:, c] + 1e-9)  # Use the predicted distribution over labels
-                  log_joint_probs[:, c] += (log_p_x_z + log_p_z + log_p_y_z).detach()
+                  log_p_y_z = torch.log(y_pred_batch[:, c] + 1e-9)
+                  log_q_z_x = self.log_gaussian_prob(z, *self.encoder(x_batch, y))
+                  
+                  log_joint_probs[:, c] +=  log_p_x_z + log_p_y_z + log_p_z - log_q_z_x
+                  print(log_joint_probs[:, c])
 
           log_joint_probs /= K
           y_pred[start:end] = F.softmax(log_joint_probs, dim=1)
