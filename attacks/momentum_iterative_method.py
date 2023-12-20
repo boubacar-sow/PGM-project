@@ -5,7 +5,8 @@ from torch import Tensor
 from torch.nn.modules.loss import _Loss
 from typing import Callable
 
-def momentum_iterative_method(model_fn: Callable[[Tensor], Tensor], x: Tensor, y: Tensor, epsilon: float, alpha: float, num_iter: int, decay_factor: float, criterion: _Loss) -> Tensor:
+def momentum_iterative_method(model_fn: Callable[[Tensor], Tensor],
+                              x: Tensor, y: Tensor, epsilon: float, alpha: float, num_iter: int, decay_factor: float, criterion: _Loss) -> Tensor:
     """Implementation of the Momentum Iterative Method (MIM) attack with PyTorch.
     
     Args:
