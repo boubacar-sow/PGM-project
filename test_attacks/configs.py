@@ -8,7 +8,7 @@ from attacks.spsa import spsa
 
 def config_fgsm():
     return {
-        'epsilon': 0.3,
+        'epsilon': 0.1,
         'clip_min': 0.,
         'clip_max': 1.,
         'targeted':False,
@@ -18,7 +18,7 @@ def config_fgsm():
     
 def config_noise():
     return {
-        'eps': 0.3,
+        'eps': 0.0,
         'clip_min': 0.,
         'clip_max': 1.
     }
@@ -47,8 +47,7 @@ def config_carlini_wagner_l2():
     return {
         'num_iter': 40,
         'lr': 0.01,
-        'c': 1.0,
-        'kappa': 0.0,
+        'c': 10,    
         'clip_min': 0.,
         'clip_max': 1.
     }
@@ -57,9 +56,7 @@ def config_spsa():
     return {
         'num_iter': 40,
         'lr': 0.01,
-        'c': 1.0,
-        'clip_min': 0.,
-        'clip_max': 1.
+        'c': 1.0
     }
 
 def load_attack(attack_method):
@@ -69,9 +66,9 @@ def load_attack(attack_method):
         return noise, config_noise()
     elif attack_method == 'momentum_iterative_method':
         return momentum_iterative_method, config_momentum_iterative_method()
-    elif attack_method == 'projected_gradient_descent':
+    elif attack_method == 'pgd':
         return projected_gradient_descent, config_projected_gradient_descent()
-    elif attack_method == 'carlini_wagner_l2':
+    elif attack_method == 'cw':
         return carlini_wagner_l2, config_carlini_wagner_l2()
     elif attack_method == 'spsa':
         return spsa, config_spsa()

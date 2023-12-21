@@ -6,14 +6,21 @@ import torch.nn as nn
 from torch.nn import functional as F
 import sys
 sys.path.append('/content/PGM-project')
-import matplotlib.pyplot as plt
-from GBZ import Encoder, Decoder
+sys.path.append('/content/PGM-project')
+sys.path.append('/content/PGM-project')
+sys.path.append('../')
+sys.path.append('../test_attacks')
+sys.path.append('/home/boubacar/Documents/PGM project/PGM-project/test_attacks')
+sys.path.append('./PGM-project/test_attacks')
+sys.path.append('/home/boubacar/Documents/PGM project/PGM-project/models')
 
+
+import matplotlib.pyplot as plt
 # Assuming you have already imported torch and torch.nn.functional as F
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 class BayesModel(nn.Module):
-    def __init__(self, data_name, hidden_channels, dimZ=64):
+    def __init__(self, model_name, data_name, hidden_channels, dimZ=64):
         super(BayesModel, self).__init__()
         if data_name == 'mnist':
             self.num_channels = 1
@@ -26,6 +33,13 @@ class BayesModel(nn.Module):
         self.hidden_channels = hidden_channels
         self.use_mean = True
         self.training = True
+        
+        if model_name == 'GBZ':
+            from models.gbz import Encoder, Decoder
+        elif model_name == 'DBX':
+            from models.dbx import Encoder, Decoder
+        else:
+            raise ValueError('model type not recognised')
         
         self.encoder = Encoder(hidden_channels=self.hidden_channels, latent_dim=dimZ, num_labels=self.num_labels)
         self.decoder = Decoder(hidden_channels=self.hidden_channels, latent_dim=dimZ, num_labels=self.num_labels)
@@ -53,7 +67,7 @@ class BayesModel(nn.Module):
         x_recon, y_pred = self.decoder(latent)
         return x_recon, y_pred, latent_mu, latent_logvar
 
-
+    
     def latent_sample(self, mu, logvar):
         if self.training:
             std = torch.exp(0.5 * logvar)
@@ -74,27 +88,60 @@ class BayesModel(nn.Module):
         ind = list(range(1, len(x.shape)))
         return torch.sum(logprob, ind)
     
-    def lower_bound(self, x, y_one_hot, K=100, beta=1.0):
-        """
-        Compute the lower bound for the input x and label y using importance sampling.
-        """
-        log_joint_probs = torch.zeros(x.shape[0], device=x.device)
+    def lowerbound_F(self, x, y, enc, dec, K=1, IS=False,  beta=1.0, use_mean=False):
 
-        z_samples = [self.latent_sample(*self.encoder(x, y_one_hot)) for _ in range(K)]
+        z, logq = self.encoding(enc,x, y, K, use_mean)
+        log_prior_z = self.log_gaussian_prob(z, torch.zeros_like(z), torch.zeros_like(z))
+        pxz, pyz = dec(torch.flatten(z,end_dim=1))
+        pxz = torch.stack(torch.tensor_split(pxz,K,dim=0),dim=0)
+        pyz = torch.stack(torch.tensor_split(pyz,K,dim=0),dim=0)
+        ind = list(range(2, len(x.shape)+1))
+        print("pxz shape: ", pxz.shape)
+        print("x shape: ", x.unsqueeze(0).shape)
+        logp = -torch.sum((x.unsqueeze(0) - pxz)**2, dim=ind)
+        logit_y = F.softmax(pyz,dim=2)
 
-        for z in z_samples:
-            log_p_x_z = self.log_bernoulli_prob(self.decoder(z)[0], x)
-            log_p_z = self.log_gaussian_prob(z, torch.zeros_like(z), torch.zeros_like(z))
-            log_p_y_z = self.log_softmax_prob(z, y_one_hot)
-            log_q_z_x = self.log_gaussian_prob(z, *self.encoder(x, y_one_hot))
-            log_joint_probs += beta * log_p_x_z + log_p_y_z + log_p_z - log_q_z_x
+        y_rep = torch.stack([y  for i in range(K)],dim=0)
+        log_pyz = -F.cross_entropy(logit_y.flatten(end_dim=1), y_rep.flatten(end_dim=1),
+                                reduction='none').reshape(y_rep.shape[:-1])
+        bound = logp * beta + log_pyz + (log_prior_z - logq)
+        if IS and K > 1 and use_mean==False:
+            bound = torch.logsumexp(bound,dim=0) - np.log(float(K))
+        return bound.squeeze()
+    
+    def encoding(self, enc, x, y, K, use_mean=False):
+        mu_qz, log_sig_qz = enc(x, y)
+        if use_mean:
+            return mu_qz.unsqueeze(0), self.log_gaussian_prob(mu_qz.unsqueeze(0), mu_qz.unsqueeze(0), log_sig_qz.unsqueeze(0))
+        ph = torch.zeros([K]+list(mu_qz.shape))
+        norm_sample = torch.normal(ph).to(device)
+        samples = mu_qz+torch.unsqueeze(log_sig_qz.exp(), dim=0)*norm_sample
+        logq = self.log_gaussian_prob(samples, mu_qz.unsqueeze(0), log_sig_qz.unsqueeze(0))
+        return samples, logq
+    
+    def bayes_classifier(self, lowerbound, x, enc, dec, dimY,  K = 1, beta=1.0, use_mean=False):
+        N = x.shape[0]
+        logpxy = []
+        for i in range(dimY):
+            y = torch.zeros([N, dimY]).to(device)
+            y[:, i] = 1
+            bound = lowerbound(x, y,enc, dec, K,
+                            IS=True, beta=beta, use_mean=use_mean)
+            logpxy.append(torch.unsqueeze(bound, 1))
+        logpxy = torch.concat(logpxy, 1)
+        pyx = F.softmax(logpxy,dim=1)
+        return pyx
 
-        log_joint_probs /= K
 
-        return log_joint_probs
-
-
-    def train_model(self, data_loader, optimizer, num_epochs=30, variational_beta=1.0, K=100):
+    def train_model(self, model_name, data_loader, optimizer, num_epochs=30, variational_beta=1.0):
+        if model_name == 'GBZ':
+            self.train_gbz(data_loader, optimizer, num_epochs, variational_beta)
+        elif model_name == 'DBX':
+            self.train_dbx(data_loader, optimizer, num_epochs, variational_beta)
+        else:
+            raise ValueError('model type not recognised')    
+        
+    def train_gbz(self, data_loader, optimizer, num_epochs=30, variational_beta=1.0):
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.train()  # Set the model to training mode
         for epoch in range(num_epochs):
@@ -121,72 +168,29 @@ class BayesModel(nn.Module):
                 optimizer.step()  # Update the model parameters
 
             print(f"Epoch {epoch + 1}/{num_epochs} Loss: {loss.item()}")
-
-    def display_images(self, original, reconstructed, epoch):
-        fig, axes = plt.subplots(nrows=2, ncols=10, figsize=(30, 6))
-
-        # Display original images
-        for i, ax in enumerate(axes[0, :]):
-            ax.imshow(original[i].reshape(28, 28).cpu(), cmap='gray')
-            ax.axis('off')
-
-        # Display reconstructed images
-        for i, ax in enumerate(axes[1, :]):
-            ax.imshow(reconstructed[i].reshape(28, 28).cpu(), cmap='gray')
-            ax.axis('off')
-
-        # Save the figure
-        plt.savefig(f'images_epoch_{epoch}.png')
-        plt.close(fig)  # Close the figure to free up memory
-
-
-
+            
+    def train_dbx(self, data_loader, optimizer, num_epochs=30, variational_beta=1.0, K=100):
+        pass
     
-    def predict(self, x, K=20, batch_size=10):
+    def predict(self, model_name, x, K=8, batch_size=10):
       """
       Predict the class probabilities for the input x using importance sampling.
       """
-      num_samples = x.shape[0]
-      num_batches = num_samples // batch_size
-      y_pred = torch.zeros(num_samples, self.num_labels, device=x.device)
-      for i in range(num_batches + 1):  # Add 1 to include the last incomplete batch
-          start = i * batch_size
-          end = min(start + batch_size, num_samples)  # Ensure we don't go beyond the number of samples
-          x_batch = x[start:end]
+      if model_name == 'GBZ':
+          return self.predict_GBZ(x, K)
+      elif model_name == 'DBX':
+          return self.predict_DBX(x, K)
+      else:
+          raise ValueError('model type not recognised')
 
-          log_joint_probs = torch.zeros(x_batch.shape[0], self.num_labels, device=x.device)
-
-          for c in range(self.num_labels):
-              y = torch.zeros(x_batch.shape[0], self.num_labels, device=x.device)
-              y[:, c] = 1
-
-              z_samples = [self.latent_sample(*self.encoder(x_batch, y)) for _ in range(K)]
-
-              for z in z_samples:
-                  # Reconstruct input and get predicted labels
-                  # x_recon, y_pred_batch = self.decoder(z)
-
-                  # Compute log probabilities
-                  # log_p_x_z = F.mse_loss(x_recon, x_batch, reduction='sum')
-                  # log_p_y_z = torch.log(y_pred_batch[:, c] + 1e-9)
-                  # log_p_z = self.log_gaussian_prob(z, torch.zeros_like(z), torch.zeros_like(z))
-                  # log_q_z_x = self.log_gaussian_prob(z, *self.encoder(x_batch, y))
-
-                  # Compute log of the ratio and add it to log_joint_probs
-                  # log_ratio = log_p_z + log_p_x_z + log_p_y_z - log_q_z_x
-                  # log_joint_probs[:, c] += log_ratio
-
-                  
-                  # Reconstruct input and get predicted labels
-                  x_recon, y_pred_batch = self.decoder(z)
-                  log_joint_probs[:, c] +=  y_pred_batch[:, c]
-                  print(log_joint_probs[:, c])
-          log_joint_probs /= K
-          y_pred[start:end] = F.softmax(log_joint_probs, dim=1)
-
-      return y_pred
-
-
+    def predict_GBZ(self, x, K=10):
+        """
+        Predict the class probabilities for the input x using importance sampling.
+        """
+        return self.bayes_classifier(self.lowerbound_F, x, self.encoder, self.decoder, self.num_labels, K=K, beta=1.0, use_mean=True)
+      
+    def predict_DBX(self, x, K=10, batch_size=10):
+        pass
 
 
 
