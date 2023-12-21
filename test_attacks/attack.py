@@ -18,7 +18,8 @@ def test_attacks(data_name, model_name, attack_method, eps, batch_size, targeted
     if data_name == 'mnist':
         from utils import data_mnist
         X_train, Y_train, X_test, Y_test = data_mnist(train_start=0, train_end=25000, test_start=0, test_end=64)
-    
+        X_train = X_train / 255.0
+        X_test = X_test / 255.0
     source_samples, img_rows, img_cols = len(X_test), X_test.shape[0], X_test.shape[1]
     nb_classes = 10
     
