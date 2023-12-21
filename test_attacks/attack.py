@@ -17,7 +17,7 @@ device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 def test_attacks(data_name, model_name, attack_method, eps, batch_size, targeted=False):
     if data_name == 'mnist':
         from utils import data_mnist
-        X_train, Y_train, X_test, Y_test = data_mnist(train_start=0, train_end=15000, test_start=0, test_end=64)
+        X_train, Y_train, X_test, Y_test = data_mnist(train_start=0, train_end=25000, test_start=0, test_end=64)
     
     source_samples, img_rows, img_cols = len(X_test), X_test.shape[0], X_test.shape[1]
     nb_classes = 10
@@ -52,7 +52,7 @@ def test_attacks(data_name, model_name, attack_method, eps, batch_size, targeted
     # Training the model on the train set and evaluating on test set with and without adversarial examples
     data_loader_train = DataLoader(list(zip(X_train.clone().detach().reshape(-1, 1, 28, 28).to(device), Y_train.clone().detach().to(device))), batch_size=batch_size, shuffle=True)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-    model.train_model(model_name, data_loader_train, optimizer, num_epochs=10)
+    model.train_model(model_name, data_loader_train, optimizer, num_epochs=25)
 
     
     # Evaluate the model on clean examples
