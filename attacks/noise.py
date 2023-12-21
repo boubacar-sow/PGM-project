@@ -4,7 +4,13 @@ import torch
 from torch import Tensor
 from typing import Optional
 
-def noise(x: Tensor, epsilon: float, clip_min: Optional[float] = None, clip_max: Optional[float] = None) -> Tensor:
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+def noise(
+    x: Tensor, 
+    epsilon: float, 
+    clip_min: Optional[float] = None, 
+    clip_max: Optional[float] = None) -> Tensor:
     """Implementation of the Noise attack with PyTorch.
     
     Args:
@@ -18,7 +24,6 @@ def noise(x: Tensor, epsilon: float, clip_min: Optional[float] = None, clip_max:
         Tensor: adversarial example, a perturbed version of the input tensor
     """
     
-    device = x.device
     x_adv = x.clone().detach().requires_grad_(True).to(device)
 
     noise = torch.zeros_like(x_adv).to(device)

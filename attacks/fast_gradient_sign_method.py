@@ -10,7 +10,7 @@ from typing import Callable
 variational_beta = 1
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 def vae_loss(recon_x, x, mu, logvar):
-    recon_loss = F.binary_cross_entropy(recon_x.view(-1, 784), x.view(-1, 784), reduction='sum')
+    recon_loss = F.mse_loss(recon_x, x, reduction='sum')
     # You can look at the derivation of the KL term here https://arxiv.org/pdf/1907.08956.pdf
     kldivergence = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
 
@@ -28,35 +28,23 @@ def fast_gradient_sign_method(
 ) -> torch.Tensor:
     """
     Implementation of the Fast Gradient Sign Method (FGSM) attack with PyTorch.
-
-    Args:
-        model (nn.Module): the model to attack
-        x (torch.Tensor): input tensor
-        epsilon (float): perturbation size
-        clip_min (float, optional): minimum value to clip the adversarial examples to
-        clip_max (float, optional): maximum value to clip the adversarial examples to
-        targeted (bool, optional): whether to perform a targeted attack
-        sanity_checks (bool, optional): whether to perform sanity checks
-
-    Returns:
-        torch.Tensor: adversarial examples
     """
     x_adv = x.clone().detach().requires_grad_(True).to(x.device)
-    x_recon, latent_mu, latent_logvar = model(x_adv, y)
-    loss = vae_loss(x_recon, x, latent_mu, latent_logvar)
+    x_recon, y_pred, latent_mu, latent_logvar = model(x_adv, y)
+    recon_loss = F.mse_loss(x_recon, x, reduction='sum')  # Use only the reconstruction loss
     if targeted:
-        loss = -loss
-    loss.backward(retain_graph=True)  # Add retain_graph=True here
+        recon_loss = -recon_loss
+    recon_loss.backward(retain_graph=True)  # Add retain_graph=True here
 
     # Check that gradients have been computed
     assert x_adv.grad is not None, "No gradients for x_adv"
-
     x_adv = x_adv + epsilon * x_adv.grad.sign()
     x_adv = torch.clamp(x_adv, min=clip_min, max=clip_max)
     if sanity_checks:
         assert (x_adv - x).abs().max() <= epsilon + 1e-6, "Max perturbation exceeded"
 
     return x_adv
+
 
 
 
