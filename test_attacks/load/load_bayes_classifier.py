@@ -164,6 +164,20 @@ class BayesModel(nn.Module):
 
               for z in z_samples:
                   # Reconstruct input and get predicted labels
+                  # x_recon, y_pred_batch = self.decoder(z)
+
+                  # Compute log probabilities
+                  # log_p_x_z = F.mse_loss(x_recon, x_batch, reduction='sum')
+                  # log_p_y_z = torch.log(y_pred_batch[:, c] + 1e-9)
+                  # log_p_z = self.log_gaussian_prob(z, torch.zeros_like(z), torch.zeros_like(z))
+                  # log_q_z_x = self.log_gaussian_prob(z, *self.encoder(x_batch, y))
+
+                  # Compute log of the ratio and add it to log_joint_probs
+                  # log_ratio = log_p_z + log_p_x_z + log_p_y_z - log_q_z_x
+                  # log_joint_probs[:, c] += log_ratio
+
+                  
+                  # Reconstruct input and get predicted labels
                   x_recon, y_pred_batch = self.decoder(z)
                   log_joint_probs[:, c] +=  y_pred_batch[:, c]
                   print(log_joint_probs[:, c])
