@@ -111,6 +111,8 @@ class BayesModel(nn.Module):
                 x_recon, y_pred, latent_mu, latent_logvar = self.forward(x, y_one_hot)
                
                 recon_loss = F.mse_loss(x_recon, x, reduction='sum')
+                # print("trues: ", y[:20])
+                # print("preds: ", torch.max(y_pred, 1)[1][:20])
                 label_loss = F.cross_entropy(y_pred, y, reduction='sum')  # Use y_pred directly
                 kldivergence = -0.5 * torch.sum(1 + latent_logvar - latent_mu.pow(2) - latent_logvar.exp())
                 loss = recon_loss + label_loss + variational_beta * kldivergence
@@ -140,16 +142,16 @@ class BayesModel(nn.Module):
 
 
     
-    def predict(self, x, K=100, batch_size=32):
+    def predict(self, x, K=20, batch_size=10):
       """
       Predict the class probabilities for the input x using importance sampling.
       """
-      num_batches = x.shape[0] // batch_size
-      y_pred = torch.zeros(x.shape[0], self.num_labels, device=x.device)
-
-      for i in range(num_batches):
+      num_samples = x.shape[0]
+      num_batches = num_samples // batch_size
+      y_pred = torch.zeros(num_samples, self.num_labels, device=x.device)
+      for i in range(num_batches + 1):  # Add 1 to include the last incomplete batch
           start = i * batch_size
-          end = start + batch_size
+          end = min(start + batch_size, num_samples)  # Ensure we don't go beyond the number of samples
           x_batch = x[start:end]
 
           log_joint_probs = torch.zeros(x_batch.shape[0], self.num_labels, device=x.device)
@@ -163,17 +165,8 @@ class BayesModel(nn.Module):
               for z in z_samples:
                   # Reconstruct input and get predicted labels
                   x_recon, y_pred_batch = self.decoder(z)
-                  # Compute MSE loss (replace log_bernoulli_prob)
-                  log_p_x_z = F.mse_loss(x_recon, x_batch, reduction='sum')
-
-                  # Other log probabilities (if needed)
-                  log_p_z = self.log_gaussian_prob(z, torch.zeros_like(z), torch.zeros_like(z))
-                  log_p_y_z = torch.log(y_pred_batch[:, c] + 1e-9)
-                  log_q_z_x = self.log_gaussian_prob(z, *self.encoder(x_batch, y))
-                  
-                  log_joint_probs[:, c] +=  log_p_x_z + log_p_y_z + log_p_z - log_q_z_x
+                  log_joint_probs[:, c] +=  y_pred_batch[:, c]
                   print(log_joint_probs[:, c])
-
           log_joint_probs /= K
           y_pred[start:end] = F.softmax(log_joint_probs, dim=1)
 
