@@ -55,8 +55,7 @@ def test_attacks(data_name, model_name, attack_method, eps, batch_size, targeted
         Y_test[:source_samples], y_preds.cpu().numpy()
     )  # Move tensor to CPU before converting to numpy
     print("Test accuracy on clean examples: {:.4f}".format(accuracy))
-    raise NotImplementedError("part of code not done")
-
+    
 
     print("Testing Attacks on Model: ", model_name)
     if targeted:
