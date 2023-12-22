@@ -43,7 +43,7 @@ def test_attacks(data_name, model_name, attack_method, eps, batch_size, targeted
     model = load_classifier(model_name, data_name)
     model = model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-    model.train_model(model_name, data_loader_train, optimizer, num_epochs=1)
+    model.train_model(model_name, data_loader_train, optimizer, num_epochs=5)
 
     # Evaluate the model on clean examples
     p_y_pred = model.predict(
@@ -55,7 +55,6 @@ def test_attacks(data_name, model_name, attack_method, eps, batch_size, targeted
         Y_test[:source_samples], y_preds.cpu().numpy()
     )  # Move tensor to CPU before converting to numpy
     print("Test accuracy on clean examples: {:.4f}".format(accuracy))
-    
 
     print("Testing Attacks on Model: ", model_name)
     if targeted:
@@ -96,8 +95,6 @@ def test_attacks(data_name, model_name, attack_method, eps, batch_size, targeted
         )  # Move tensor to CPU before converting to numpy
     adv_examples = np.array(adv_examples, dtype=np.float32)
     print("-" * 30)
-
-
 
     # Evaluate the model on adversarial examples
     p_y_pred = model.predict(

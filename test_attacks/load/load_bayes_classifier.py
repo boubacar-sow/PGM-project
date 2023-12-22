@@ -106,7 +106,7 @@ class BayesModel(nn.Module):
         self.hidden_channels = hidden_channels
         self.use_mean = True
         self.training = True
-
+        self.model_name = model_name
         if model_name == "GBZ":
             from models.gbz import Encoder, Decoder
         elif model_name == "DBX":
